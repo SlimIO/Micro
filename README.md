@@ -19,22 +19,29 @@ $ yarn add @slimio/micro
 ```js
 const micro = require("@slimio/micro");
 
-console.log(micro.now());
-console.log(micro.gettimeofday());
+console.log(micro.now()); // 1538484472718548
+console.log(micro.gettimeofday()); // { sec: 1538484493, usec: 222313 }
 ```
 
 ## API
 
 ### now(): number
-Return the current timestamp with a microseconds precision.
+Return the current timestamp with a microsecond precision. You can achieve the same result with gettimeofday():
+```js
+const tv = micro.gettimeofday();
+const now = (tv.sec * 1000000) + tv.usec;
+console.log(now); // 1538484472718548
+```
 
 ### gettimeofday(): timeval
-UNIX gettimeofday binding (polyfill has been added for Windows too). Return a timeval interface Object.
+UNIX gettimeofday binding (polyfill has been added for Windows too). Return a **timeval** interface Object.
 ```ts
 interface timeval {
     sec: number;
     usec: number;
 }
+
+export function gettimeofday(): timeval;
 ```
 
 ## How to build the project
