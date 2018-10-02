@@ -1,6 +1,8 @@
 # Micro
 
-NodeJS C NAPI low level binding to get high resolution timestamp (in microseconds)
+NodeJS C NAPI low level binding to get high resolution timestamp (in microseconds).
+
+This API is synchronous.
 
 ## Getting Started
 
@@ -15,12 +17,25 @@ $ yarn add @slimio/micro
 ## Usage example
 
 ```js
-WIP
+const micro = require("@slimio/micro");
+
+console.log(micro.now());
+console.log(micro.gettimeofday());
 ```
 
 ## API
 
-> WIP
+### now(): number
+Return the current timestamp with a microseconds precision.
+
+### gettimeofday(): timeval
+UNIX gettimeofday binding (polyfill has been added for Windows too). Return a timeval interface Object.
+```ts
+interface timeval {
+    sec: number;
+    usec: number;
+}
+```
 
 ## How to build the project
 
