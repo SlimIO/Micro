@@ -27,6 +27,9 @@ namespace details {
 #define NAPI_THROW_IF_FAILED(env, status, ...)           \
   if ((status) != napi_ok) throw Error::New(env);
 
+#define NAPI_THROW_IF_FAILED_VOID(env, status)           \
+  if ((status) != napi_ok) throw Error::New(env);
+
 #else // NAPI_CPP_EXCEPTIONS
 
 #define NAPI_THROW(e)  (e).ThrowAsJavaScriptException();
@@ -40,6 +43,14 @@ namespace details {
     return __VA_ARGS__;                                  \
   }
 
+// We need a _VOID version of this macro to avoid warnings resulting from
+// leaving the NAPI_THROW_IF_FAILED `...` argument empty.
+#define NAPI_THROW_IF_FAILED_VOID(env, status)           \
+  if ((status) != napi_ok) {                             \
+    Error::New(env).ThrowAsJavaScriptException();        \
+    return;                                              \
+  }
+
 #endif // NAPI_CPP_EXCEPTIONS
 
 #define NAPI_FATAL_IF_FAILED(status, location, message)  \
@@ -48,6 +59,41 @@ namespace details {
       Error::Fatal((location), (message));               \
     }                                                    \
   } while (0)
+
+// Attach a data item to an object and delete it when the object gets
+// garbage-collected.
+// TODO: Replace this code with `napi_add_finalizer()` whenever it becomes
+// available on all supported versions of Node.js.
+template <typename FreeType>
+static inline napi_status AttachData(napi_env env,
+                                     napi_value obj,
+                                     FreeType* data) {
+  napi_value symbol, external;
+  napi_status status = napi_create_symbol(env, nullptr, &symbol);
+  if (status == napi_ok) {
+    status = napi_create_external(env,
+                              data,
+                              [](napi_env /*env*/, void* data, void* /*hint*/) {
+                                delete static_cast<FreeType*>(data);
+                              },
+                              nullptr,
+                              &external);
+    if (status == napi_ok) {
+      napi_property_descriptor desc = {
+        nullptr,
+        symbol,
+        nullptr,
+        nullptr,
+        nullptr,
+        external,
+        napi_default,
+        nullptr
+      };
+      status = napi_define_properties(env, obj, 1, &desc);
+    }
+  }
+  return status;
+}
 
 // For use in JS to C++ callback wrappers to catch any Napi::Error exceptions
 // and rethrow them as JavaScript exceptions before returning from the callback.
@@ -151,6 +197,10 @@ struct AccessorCallbackData {
 
 }  // namespace details
 
+#ifndef NODE_ADDON_API_DISABLE_DEPRECATED
+# include "napi-inl.deprecated.h"
+#endif // !NODE_ADDON_API_DISABLE_DEPRECATED
+
 ////////////////////////////////////////////////////////////////////////////////
 // Module registration
 ////////////////////////////////////////////////////////////////////////////////
@@ -160,7 +210,7 @@ struct AccessorCallbackData {
                                 napi_value exports) {     \
     return Napi::RegisterModule(env, exports, regfunc);   \
   }                                                       \
-  NAPI_MODULE(modname, __napi_ ## regfunc);
+  NAPI_MODULE(modname, __napi_ ## regfunc)
 
 // Adapt the NAPI_MODULE registration function:
 //  - Wrap the arguments in NAPI wrappers.
@@ -287,6 +337,14 @@ inline bool Value::IsNumber() const {
   return Type() == napi_number;
 }
 
+// currently experimental guard with version of NAPI_VERSION that it is
+// released in once it is no longer experimental
+#if (NAPI_VERSION > 2147483646)
+inline bool Value::IsBigInt() const {
+  return Type() == napi_bigint;
+}
+#endif  // NAPI_EXPERIMENTAL
+
 inline bool Value::IsString() const {
   return Type() == napi_string;
 }
@@ -347,7 +405,6 @@ inline bool Value::IsPromise() const {
   return result;
 }
 
-#if NAPI_DATA_VIEW_FEATURE
 inline bool Value::IsDataView() const {
   if (_value == nullptr) {
     return false;
@@ -358,7 +415,6 @@ inline bool Value::IsDataView() const {
   NAPI_THROW_IF_FAILED(_env, status, false);
   return result;
 }
-#endif
 
 inline bool Value::IsBuffer() const {
   if (_value == nullptr) {
@@ -504,6 +560,71 @@ inline double Number::DoubleValue() const {
   NAPI_THROW_IF_FAILED(_env, status, 0);
   return result;
 }
+
+// currently experimental guard with version of NAPI_VERSION that it is
+// released in once it is no longer experimental
+#if (NAPI_VERSION > 2147483646)
+////////////////////////////////////////////////////////////////////////////////
+// BigInt Class
+////////////////////////////////////////////////////////////////////////////////
+
+inline BigInt BigInt::New(napi_env env, int64_t val) {
+  napi_value value;
+  napi_status status = napi_create_bigint_int64(env, val, &value);
+  NAPI_THROW_IF_FAILED(env, status, BigInt());
+  return BigInt(env, value);
+}
+
+inline BigInt BigInt::New(napi_env env, uint64_t val) {
+  napi_value value;
+  napi_status status = napi_create_bigint_uint64(env, val, &value);
+  NAPI_THROW_IF_FAILED(env, status, BigInt());
+  return BigInt(env, value);
+}
+
+inline BigInt BigInt::New(napi_env env, int sign_bit, size_t word_count, const uint64_t* words) {
+  napi_value value;
+  napi_status status = napi_create_bigint_words(env, sign_bit, word_count, words, &value);
+  NAPI_THROW_IF_FAILED(env, status, BigInt());
+  return BigInt(env, value);
+}
+
+inline BigInt::BigInt() : Value() {
+}
+
+inline BigInt::BigInt(napi_env env, napi_value value) : Value(env, value) {
+}
+
+inline int64_t BigInt::Int64Value(bool* lossless) const {
+  int64_t result;
+  napi_status status = napi_get_value_bigint_int64(
+      _env, _value, &result, lossless);
+  NAPI_THROW_IF_FAILED(_env, status, 0);
+  return result;
+}
+
+inline uint64_t BigInt::Uint64Value(bool* lossless) const {
+  uint64_t result;
+  napi_status status = napi_get_value_bigint_uint64(
+      _env, _value, &result, lossless);
+  NAPI_THROW_IF_FAILED(_env, status, 0);
+  return result;
+}
+
+inline size_t BigInt::WordCount() const {
+  size_t word_count;
+  napi_status status = napi_get_value_bigint_words(
+      _env, _value, nullptr, &word_count, nullptr);
+  NAPI_THROW_IF_FAILED(_env, status, 0);
+  return word_count;
+}
+
+inline void BigInt::ToWords(int* sign_bit, size_t* word_count, uint64_t* words) {
+  napi_status status = napi_get_value_bigint_words(
+      _env, _value, sign_bit, word_count, words);
+  NAPI_THROW_IF_FAILED_VOID(_env, status);
+}
+#endif  // NAPI_EXPERIMENTAL
 
 ////////////////////////////////////////////////////////////////////////////////
 // Name class
@@ -867,21 +988,21 @@ template <typename ValueType>
 inline void Object::Set(napi_value key, const ValueType& value) {
   napi_status status =
       napi_set_property(_env, _value, key, Value::From(_env, value));
-  NAPI_THROW_IF_FAILED(_env, status);
+  NAPI_THROW_IF_FAILED_VOID(_env, status);
 }
 
 template <typename ValueType>
 inline void Object::Set(Value key, const ValueType& value) {
   napi_status status =
       napi_set_property(_env, _value, key, Value::From(_env, value));
-  NAPI_THROW_IF_FAILED(_env, status);
+  NAPI_THROW_IF_FAILED_VOID(_env, status);
 }
 
 template <typename ValueType>
 inline void Object::Set(const char* utf8name, const ValueType& value) {
   napi_status status =
       napi_set_named_property(_env, _value, utf8name, Value::From(_env, value));
-  NAPI_THROW_IF_FAILED(_env, status);
+  NAPI_THROW_IF_FAILED_VOID(_env, status);
 }
 
 template <typename ValueType>
@@ -929,7 +1050,7 @@ template <typename ValueType>
 inline void Object::Set(uint32_t index, const ValueType& value) {
   napi_status status =
       napi_set_element(_env, _value, index, Value::From(_env, value));
-  NAPI_THROW_IF_FAILED(_env, status);
+  NAPI_THROW_IF_FAILED_VOID(_env, status);
 }
 
 inline bool Object::Delete(uint32_t index) {
@@ -949,19 +1070,19 @@ inline Array Object::GetPropertyNames() {
 inline void Object::DefineProperty(const PropertyDescriptor& property) {
   napi_status status = napi_define_properties(_env, _value, 1,
     reinterpret_cast<const napi_property_descriptor*>(&property));
-  NAPI_THROW_IF_FAILED(_env, status);
+  NAPI_THROW_IF_FAILED_VOID(_env, status);
 }
 
 inline void Object::DefineProperties(const std::initializer_list<PropertyDescriptor>& properties) {
   napi_status status = napi_define_properties(_env, _value, properties.size(),
     reinterpret_cast<const napi_property_descriptor*>(properties.begin()));
-  NAPI_THROW_IF_FAILED(_env, status);
+  NAPI_THROW_IF_FAILED_VOID(_env, status);
 }
 
 inline void Object::DefineProperties(const std::vector<PropertyDescriptor>& properties) {
   napi_status status = napi_define_properties(_env, _value, properties.size(),
     reinterpret_cast<const napi_property_descriptor*>(properties.data()));
-  NAPI_THROW_IF_FAILED(_env, status);
+  NAPI_THROW_IF_FAILED_VOID(_env, status);
 }
 
 inline bool Object::InstanceOf(const Function& constructor) const {
@@ -1171,11 +1292,10 @@ inline void ArrayBuffer::EnsureInfo() const {
   // since they can never change during the lifetime of the ArrayBuffer.
   if (_data == nullptr) {
     napi_status status = napi_get_arraybuffer_info(_env, _value, &_data, &_length);
-    NAPI_THROW_IF_FAILED(_env, status);
+    NAPI_THROW_IF_FAILED_VOID(_env, status);
   }
 }
 
-#if NAPI_DATA_VIEW_FEATURE
 ////////////////////////////////////////////////////////////////////////////////
 // DataView class
 ////////////////////////////////////////////////////////////////////////////////
@@ -1222,7 +1342,7 @@ inline DataView::DataView(napi_env env, napi_value value) : Object(env, value) {
     &_data   /* data */,
     nullptr  /* arrayBuffer */,
     nullptr  /* byteOffset */);
-  NAPI_THROW_IF_FAILED(_env, status);
+  NAPI_THROW_IF_FAILED_VOID(_env, status);
 }
 
 inline Napi::ArrayBuffer DataView::ArrayBuffer() const {
@@ -1346,7 +1466,6 @@ inline void DataView::WriteData(size_t byteOffset, T value) const {
 
   *reinterpret_cast<T*>(static_cast<uint8_t*>(_data) + byteOffset) = value;
 }
-#endif
 
 ////////////////////////////////////////////////////////////////////////////////
 // TypedArray class
@@ -1466,7 +1585,7 @@ inline TypedArrayOf<T>::TypedArrayOf(napi_env env, napi_value value)
   : TypedArray(env, value), _data(nullptr) {
   napi_status status = napi_get_typedarray_info(
     _env, _value, &_type, &_length, reinterpret_cast<void**>(&_data), nullptr, nullptr);
-  NAPI_THROW_IF_FAILED(_env, status);
+  NAPI_THROW_IF_FAILED_VOID(_env, status);
 }
 
 template <typename T>
@@ -1507,6 +1626,22 @@ inline const T* TypedArrayOf<T>::Data() const {
 // Function class
 ////////////////////////////////////////////////////////////////////////////////
 
+template <typename CbData>
+static inline napi_status
+CreateFunction(napi_env env,
+               const char* utf8name,
+               napi_callback cb,
+               CbData* data,
+               napi_value* result) {
+  napi_status status =
+      napi_create_function(env, utf8name, NAPI_AUTO_LENGTH, cb, data, result);
+  if (status == napi_ok) {
+    status = Napi::details::AttachData(env, *result, data);
+  }
+
+  return status;
+}
+
 template <typename Callable>
 inline Function Function::New(napi_env env,
                               Callable cb,
@@ -1514,12 +1649,14 @@ inline Function Function::New(napi_env env,
                               void* data) {
   typedef decltype(cb(CallbackInfo(nullptr, nullptr))) ReturnType;
   typedef details::CallbackData<Callable, ReturnType> CbData;
-  // TODO: Delete when the function is destroyed
   auto callbackData = new CbData({ cb, data });
 
   napi_value value;
-  napi_status status = napi_create_function(
-    env, utf8name, NAPI_AUTO_LENGTH, CbData::Wrapper, callbackData, &value);
+  napi_status status = CreateFunction(env,
+                                      utf8name,
+                                      CbData::Wrapper,
+                                      callbackData,
+                                      &value);
   NAPI_THROW_IF_FAILED(env, status, Function());
   return Function(env, value);
 }
@@ -1571,20 +1708,27 @@ inline Value Function::Call(napi_value recv, size_t argc, const napi_value* args
 }
 
 inline Value Function::MakeCallback(
-    napi_value recv, const std::initializer_list<napi_value>& args) const {
-  return MakeCallback(recv, args.size(), args.begin());
+    napi_value recv,
+    const std::initializer_list<napi_value>& args,
+    napi_async_context context) const {
+  return MakeCallback(recv, args.size(), args.begin(), context);
 }
 
 inline Value Function::MakeCallback(
-    napi_value recv, const std::vector<napi_value>& args) const {
-  return MakeCallback(recv, args.size(), args.data());
+    napi_value recv,
+    const std::vector<napi_value>& args,
+    napi_async_context context) const {
+  return MakeCallback(recv, args.size(), args.data(), context);
 }
 
 inline Value Function::MakeCallback(
-    napi_value recv, size_t argc, const napi_value* args) const {
+    napi_value recv,
+    size_t argc,
+    const napi_value* args,
+    napi_async_context context) const {
   napi_value result;
   napi_status status = napi_make_callback(
-    _env, nullptr, recv, _value, argc, args, &result);
+    _env, context, recv, _value, argc, args, &result);
   NAPI_THROW_IF_FAILED(_env, status, Value());
   return Value(_env, result);
 }
@@ -1615,21 +1759,25 @@ inline Promise::Deferred Promise::Deferred::New(napi_env env) {
 
 inline Promise::Deferred::Deferred(napi_env env) : _env(env) {
   napi_status status = napi_create_promise(_env, &_deferred, &_promise);
-  NAPI_THROW_IF_FAILED(_env, status);
+  NAPI_THROW_IF_FAILED_VOID(_env, status);
 }
 
 inline Promise Promise::Deferred::Promise() const {
   return Napi::Promise(_env, _promise);
 }
 
+inline Napi::Env Promise::Deferred::Env() const {
+  return Napi::Env(_env);
+}
+
 inline void Promise::Deferred::Resolve(napi_value value) const {
   napi_status status = napi_resolve_deferred(_env, _deferred, value);
-  NAPI_THROW_IF_FAILED(_env, status);
+  NAPI_THROW_IF_FAILED_VOID(_env, status);
 }
 
 inline void Promise::Deferred::Reject(napi_value value) const {
   napi_status status = napi_reject_deferred(_env, _deferred, value);
-  NAPI_THROW_IF_FAILED(_env, status);
+  NAPI_THROW_IF_FAILED_VOID(_env, status);
 }
 
 inline Promise::Promise(napi_env env, napi_value value) : Object(env, value) {
@@ -1748,7 +1896,7 @@ inline void Buffer<T>::EnsureInfo() const {
     size_t byteLength;
     void* voidData;
     napi_status status = napi_get_buffer_info(_env, _value, &voidData, &byteLength);
-    NAPI_THROW_IF_FAILED(_env, status);
+    NAPI_THROW_IF_FAILED_VOID(_env, status);
     _length = byteLength / sizeof (T);
     _data = static_cast<T*>(voidData);
   }
@@ -1884,7 +2032,7 @@ inline void Error::ThrowAsJavaScriptException() const {
   HandleScope scope(_env);
   if (!IsEmpty()) {
     napi_status status = napi_throw(_env, Value());
-    NAPI_THROW_IF_FAILED(_env, status);
+    NAPI_THROW_IF_FAILED_VOID(_env, status);
   }
 }
 
@@ -2073,7 +2221,7 @@ template <typename T>
 inline void Reference<T>::Reset() {
   if (_ref != nullptr) {
     napi_status status = napi_delete_reference(_env, _ref);
-    NAPI_THROW_IF_FAILED(_env, status);
+    NAPI_THROW_IF_FAILED_VOID(_env, status);
     _ref = nullptr;
   }
 }
@@ -2086,7 +2234,7 @@ inline void Reference<T>::Reset(const T& value, uint32_t refcount) {
   napi_value val = value;
   if (val != nullptr) {
     napi_status status = napi_create_reference(_env, value, refcount, &_ref);
-    NAPI_THROW_IF_FAILED(_env, status);
+    NAPI_THROW_IF_FAILED_VOID(_env, status);
   }
 }
 
@@ -2321,10 +2469,10 @@ inline Napi::Value FunctionReference::Call(
   return scope.Escape(result);
 }
 
-inline Napi::Value FunctionReference::MakeCallback(
-    napi_value recv, const std::initializer_list<napi_value>& args) const {
+inline Napi::Value FunctionReference::Call(
+    napi_value recv, size_t argc, const napi_value* args) const {
   EscapableHandleScope scope(_env);
-  Napi::Value result = Value().MakeCallback(recv, args);
+  Napi::Value result = Value().Call(recv, argc, args);
   if (scope.Env().IsExceptionPending()) {
     return Value();
   }
@@ -2332,9 +2480,36 @@ inline Napi::Value FunctionReference::MakeCallback(
 }
 
 inline Napi::Value FunctionReference::MakeCallback(
-    napi_value recv, const std::vector<napi_value>& args) const {
+    napi_value recv,
+    const std::initializer_list<napi_value>& args,
+    napi_async_context context) const {
   EscapableHandleScope scope(_env);
-  Napi::Value result = Value().MakeCallback(recv, args);
+  Napi::Value result = Value().MakeCallback(recv, args, context);
+  if (scope.Env().IsExceptionPending()) {
+    return Value();
+  }
+  return scope.Escape(result);
+}
+
+inline Napi::Value FunctionReference::MakeCallback(
+    napi_value recv,
+    const std::vector<napi_value>& args,
+    napi_async_context context) const {
+  EscapableHandleScope scope(_env);
+  Napi::Value result = Value().MakeCallback(recv, args, context);
+  if (scope.Env().IsExceptionPending()) {
+    return Value();
+  }
+  return scope.Escape(result);
+}
+
+inline Napi::Value FunctionReference::MakeCallback(
+    napi_value recv,
+    size_t argc,
+    const napi_value* args,
+    napi_async_context context) const {
+  EscapableHandleScope scope(_env);
+  Napi::Value result = Value().MakeCallback(recv, argc, args, context);
   if (scope.Env().IsExceptionPending()) {
     return Value();
   }
@@ -2360,7 +2535,7 @@ inline CallbackInfo::CallbackInfo(napi_env env, napi_callback_info info)
   _argc = _staticArgCount;
   _argv = _staticArgs;
   napi_status status = napi_get_cb_info(env, info, &_argc, _argv, &_this, &_data);
-  NAPI_THROW_IF_FAILED(_env, status);
+  NAPI_THROW_IF_FAILED_VOID(_env, status);
 
   if (_argc > _staticArgCount) {
     // Use either a fixed-size array (on the stack) or a dynamically-allocated
@@ -2369,7 +2544,7 @@ inline CallbackInfo::CallbackInfo(napi_env env, napi_callback_info info)
     _argv = _dynamicArgs;
 
     status = napi_get_cb_info(env, info, &_argc, _argv, nullptr, nullptr);
-    NAPI_THROW_IF_FAILED(_env, status);
+    NAPI_THROW_IF_FAILED_VOID(_env, status);
   }
 }
 
@@ -2423,13 +2598,17 @@ inline void CallbackInfo::SetData(void* data) {
 
 template <typename Getter>
 inline PropertyDescriptor
-PropertyDescriptor::Accessor(const char* utf8name,
+PropertyDescriptor::Accessor(Napi::Env env,
+                             Napi::Object object,
+                             const char* utf8name,
                              Getter getter,
                              napi_property_attributes attributes,
-                             void* data) {
+                             void* /*data*/) {
   typedef details::CallbackData<Getter, Napi::Value> CbData;
-  // TODO: Delete when the function is destroyed
   auto callbackData = new CbData({ getter, nullptr });
+
+  napi_status status = AttachData(env, object, callbackData);
+  NAPI_THROW_IF_FAILED(env, status, napi_property_descriptor());
 
   return PropertyDescriptor({
     utf8name,
@@ -2444,21 +2623,27 @@ PropertyDescriptor::Accessor(const char* utf8name,
 }
 
 template <typename Getter>
-inline PropertyDescriptor PropertyDescriptor::Accessor(const std::string& utf8name,
+inline PropertyDescriptor PropertyDescriptor::Accessor(Napi::Env env,
+                                                       Napi::Object object,
+                                                       const std::string& utf8name,
                                                        Getter getter,
                                                        napi_property_attributes attributes,
                                                        void* data) {
-  return Accessor(utf8name.c_str(), getter, attributes, data);
+  return Accessor(env, object, utf8name.c_str(), getter, attributes, data);
 }
 
 template <typename Getter>
-inline PropertyDescriptor PropertyDescriptor::Accessor(napi_value name,
+inline PropertyDescriptor PropertyDescriptor::Accessor(Napi::Env env,
+                                                       Napi::Object object,
+                                                       Name name,
                                                        Getter getter,
                                                        napi_property_attributes attributes,
-                                                       void* data) {
+                                                       void* /*data*/) {
   typedef details::CallbackData<Getter, Napi::Value> CbData;
-  // TODO: Delete when the function is destroyed
   auto callbackData = new CbData({ getter, nullptr });
+
+  napi_status status = AttachData(env, object, callbackData);
+  NAPI_THROW_IF_FAILED(env, status, napi_property_descriptor());
 
   return PropertyDescriptor({
     nullptr,
@@ -2472,24 +2657,19 @@ inline PropertyDescriptor PropertyDescriptor::Accessor(napi_value name,
   });
 }
 
-template <typename Getter>
-inline PropertyDescriptor PropertyDescriptor::Accessor(Name name,
-                                                       Getter getter,
-                                                       napi_property_attributes attributes,
-                                                       void* data) {
-  napi_value nameValue = name;
-  return PropertyDescriptor::Accessor(nameValue, getter, attributes, data);
-}
-
 template <typename Getter, typename Setter>
-inline PropertyDescriptor PropertyDescriptor::Accessor(const char* utf8name,
+inline PropertyDescriptor PropertyDescriptor::Accessor(Napi::Env env,
+                                                       Napi::Object object,
+                                                       const char* utf8name,
                                                        Getter getter,
                                                        Setter setter,
                                                        napi_property_attributes attributes,
-                                                       void* data) {
+                                                       void* /*data*/) {
   typedef details::AccessorCallbackData<Getter, Setter> CbData;
-  // TODO: Delete when the function is destroyed
   auto callbackData = new CbData({ getter, setter });
+
+  napi_status status = AttachData(env, object, callbackData);
+  NAPI_THROW_IF_FAILED(env, status, napi_property_descriptor());
 
   return PropertyDescriptor({
     utf8name,
@@ -2504,23 +2684,29 @@ inline PropertyDescriptor PropertyDescriptor::Accessor(const char* utf8name,
 }
 
 template <typename Getter, typename Setter>
-inline PropertyDescriptor PropertyDescriptor::Accessor(const std::string& utf8name,
+inline PropertyDescriptor PropertyDescriptor::Accessor(Napi::Env env,
+                                                       Napi::Object object,
+                                                       const std::string& utf8name,
                                                        Getter getter,
                                                        Setter setter,
                                                        napi_property_attributes attributes,
                                                        void* data) {
-  return Accessor(utf8name.c_str(), getter, setter, attributes, data);
+  return Accessor(env, object, utf8name.c_str(), getter, setter, attributes, data);
 }
 
 template <typename Getter, typename Setter>
-inline PropertyDescriptor PropertyDescriptor::Accessor(napi_value name,
+inline PropertyDescriptor PropertyDescriptor::Accessor(Napi::Env env,
+                                                       Napi::Object object,
+                                                       Name name,
                                                        Getter getter,
                                                        Setter setter,
                                                        napi_property_attributes attributes,
-                                                       void* data) {
+                                                       void* /*data*/) {
   typedef details::AccessorCallbackData<Getter, Setter> CbData;
-  // TODO: Delete when the function is destroyed
   auto callbackData = new CbData({ getter, setter });
+
+  napi_status status = AttachData(env, object, callbackData);
+  NAPI_THROW_IF_FAILED(env, status, napi_property_descriptor());
 
   return PropertyDescriptor({
     nullptr,
@@ -2534,75 +2720,52 @@ inline PropertyDescriptor PropertyDescriptor::Accessor(napi_value name,
   });
 }
 
-template <typename Getter, typename Setter>
-inline PropertyDescriptor PropertyDescriptor::Accessor(Name name,
-                                                       Getter getter,
-                                                       Setter setter,
-                                                       napi_property_attributes attributes,
-                                                       void* data) {
-  napi_value nameValue = name;
-  return PropertyDescriptor::Accessor(nameValue, getter, setter, attributes, data);
-}
-
 template <typename Callable>
-inline PropertyDescriptor PropertyDescriptor::Function(const char* utf8name,
+inline PropertyDescriptor PropertyDescriptor::Function(Napi::Env env,
+                                                       Napi::Object /*object*/,
+                                                       const char* utf8name,
                                                        Callable cb,
                                                        napi_property_attributes attributes,
                                                        void* data) {
-  typedef decltype(cb(CallbackInfo(nullptr, nullptr))) ReturnType;
-  typedef details::CallbackData<Callable, ReturnType> CbData;
-  // TODO: Delete when the function is destroyed
-  auto callbackData = new CbData({ cb, nullptr });
-
   return PropertyDescriptor({
     utf8name,
     nullptr,
-    CbData::Wrapper,
     nullptr,
     nullptr,
     nullptr,
+    Napi::Function::New(env, cb, utf8name, data),
     attributes,
-    callbackData
+    nullptr
   });
 }
 
 template <typename Callable>
-inline PropertyDescriptor PropertyDescriptor::Function(const std::string& utf8name,
+inline PropertyDescriptor PropertyDescriptor::Function(Napi::Env env,
+                                                       Napi::Object object,
+                                                       const std::string& utf8name,
                                                        Callable cb,
                                                        napi_property_attributes attributes,
                                                        void* data) {
-  return Function(utf8name.c_str(), cb, attributes, data);
+  return Function(env, object, utf8name.c_str(), cb, attributes, data);
 }
 
 template <typename Callable>
-inline PropertyDescriptor PropertyDescriptor::Function(napi_value name,
+inline PropertyDescriptor PropertyDescriptor::Function(Napi::Env env,
+                                                       Napi::Object /*object*/,
+                                                       Name name,
                                                        Callable cb,
                                                        napi_property_attributes attributes,
                                                        void* data) {
-  typedef decltype(cb(CallbackInfo(nullptr, nullptr))) ReturnType;
-  typedef details::CallbackData<Callable, ReturnType> CbData;
-  // TODO: Delete when the function is destroyed
-  auto callbackData = new CbData({ cb, nullptr });
-
   return PropertyDescriptor({
     nullptr,
     name,
-    CbData::Wrapper,
     nullptr,
     nullptr,
     nullptr,
+    Napi::Function::New(env, cb, nullptr, data),
     attributes,
-    callbackData
+    nullptr
   });
-}
-
-template <typename Callable>
-inline PropertyDescriptor PropertyDescriptor::Function(Name name,
-                                                       Callable cb,
-                                                       napi_property_attributes attributes,
-                                                       void* data) {
-  napi_value nameValue = name;
-  return PropertyDescriptor::Function(nameValue, cb, attributes, data);
 }
 
 inline PropertyDescriptor PropertyDescriptor::Value(const char* utf8name,
@@ -2659,7 +2822,7 @@ inline ObjectWrap<T>::ObjectWrap(const Napi::CallbackInfo& callbackInfo) {
   napi_ref ref;
   T* instance = static_cast<T*>(this);
   status = napi_wrap(env, wrapper, instance, FinalizeCallback, nullptr, &ref);
-  NAPI_THROW_IF_FAILED(env, status)
+  NAPI_THROW_IF_FAILED_VOID(env, status);
 
   Reference<Object>* instanceRef = instance;
   *instanceRef = Reference<Object>(env, ref);
@@ -2674,19 +2837,105 @@ inline T* ObjectWrap<T>::Unwrap(Object wrapper) {
 }
 
 template <typename T>
+inline Function
+ObjectWrap<T>::DefineClass(Napi::Env env,
+                           const char* utf8name,
+                           const size_t props_count,
+                           const napi_property_descriptor* descriptors,
+                           void* data) {
+  napi_status status;
+  std::vector<napi_property_descriptor> props(props_count);
+
+  // We copy the descriptors to a local array because before defining the class
+  // we must replace static method property descriptors with value property
+  // descriptors such that the value is a function-valued `napi_value` created
+  // with `CreateFunction()`.
+  //
+  // This replacement could be made for instance methods as well, but V8 aborts
+  // if we do that, because it expects methods defined on the prototype template
+  // to have `FunctionTemplate`s.
+  for (size_t index = 0; index < props_count; index++) {
+    props[index] = descriptors[index];
+    napi_property_descriptor* prop = &props[index];
+    if (prop->method == T::StaticMethodCallbackWrapper) {
+      status = CreateFunction(env,
+               utf8name,
+               prop->method,
+               static_cast<StaticMethodCallbackData*>(prop->data),
+               &(prop->value));
+      NAPI_THROW_IF_FAILED(env, status, Function());
+      prop->method = nullptr;
+      prop->data = nullptr;
+    } else if (prop->method == T::StaticVoidMethodCallbackWrapper) {
+      status = CreateFunction(env,
+               utf8name,
+               prop->method,
+               static_cast<StaticVoidMethodCallbackData*>(prop->data),
+               &(prop->value));
+      NAPI_THROW_IF_FAILED(env, status, Function());
+      prop->method = nullptr;
+      prop->data = nullptr;
+    }
+  }
+
+  napi_value value;
+  status = napi_define_class(env,
+                             utf8name,
+                             NAPI_AUTO_LENGTH,
+                             T::ConstructorCallbackWrapper,
+                             data,
+                             props_count,
+                             props.data(),
+                             &value);
+  NAPI_THROW_IF_FAILED(env, status, Function());
+
+  // After defining the class we iterate once more over the property descriptors
+  // and attach the data associated with accessors and instance methods to the
+  // newly created JavaScript class.
+  for (size_t idx = 0; idx < props_count; idx++) {
+    const napi_property_descriptor* prop = &props[idx];
+
+    if (prop->getter == T::StaticGetterCallbackWrapper ||
+        prop->setter == T::StaticSetterCallbackWrapper) {
+      status = Napi::details::AttachData(env,
+                          value,
+                          static_cast<StaticAccessorCallbackData*>(prop->data));
+      NAPI_THROW_IF_FAILED(env, status, Function());
+    } else if (prop->getter == T::InstanceGetterCallbackWrapper ||
+        prop->setter == T::InstanceSetterCallbackWrapper) {
+      status = Napi::details::AttachData(env,
+                          value,
+                          static_cast<InstanceAccessorCallbackData*>(prop->data));
+      NAPI_THROW_IF_FAILED(env, status, Function());
+    } else if (prop->method != nullptr && !(prop->attributes & napi_static)) {
+      if (prop->method == T::InstanceVoidMethodCallbackWrapper) {
+        status = Napi::details::AttachData(env,
+                      value,
+                      static_cast<InstanceVoidMethodCallbackData*>(prop->data));
+        NAPI_THROW_IF_FAILED(env, status, Function());
+      } else if (prop->method == T::InstanceMethodCallbackWrapper) {
+        status = Napi::details::AttachData(env,
+                          value,
+                          static_cast<InstanceMethodCallbackData*>(prop->data));
+        NAPI_THROW_IF_FAILED(env, status, Function());
+      }
+    }
+  }
+
+  return Function(env, value);
+}
+
+template <typename T>
 inline Function ObjectWrap<T>::DefineClass(
     Napi::Env env,
     const char* utf8name,
     const std::initializer_list<ClassPropertyDescriptor<T>>& properties,
     void* data) {
-  napi_value value;
-  napi_status status = napi_define_class(
-    env, utf8name, NAPI_AUTO_LENGTH,
-    T::ConstructorCallbackWrapper, data, properties.size(),
-    reinterpret_cast<const napi_property_descriptor*>(properties.begin()), &value);
-  NAPI_THROW_IF_FAILED(env, status, Function());
-
-  return Function(env, value);
+  return DefineClass(env,
+          utf8name,
+          properties.size(),
+          reinterpret_cast<const napi_property_descriptor*>(properties.begin()),
+          data);
 }
 
 template <typename T>
@@ -2695,14 +2944,11 @@ inline Function ObjectWrap<T>::DefineClass(
     const char* utf8name,
     const std::vector<ClassPropertyDescriptor<T>>& properties,
     void* data) {
-  napi_value value;
-  napi_status status = napi_define_class(
-    env, utf8name, NAPI_AUTO_LENGTH,
-    T::ConstructorCallbackWrapper, data, properties.size(),
-    reinterpret_cast<const napi_property_descriptor*>(properties.data()), &value);
-  NAPI_THROW_IF_FAILED(env, status, Function());
-
-  return Function(env, value);
+  return DefineClass(env,
+           utf8name,
+           properties.size(),
+           reinterpret_cast<const napi_property_descriptor*>(properties.data()),
+           data);
 }
 
 template <typename T>
@@ -2711,7 +2957,6 @@ inline ClassPropertyDescriptor<T> ObjectWrap<T>::StaticMethod(
     StaticVoidMethodCallback method,
     napi_property_attributes attributes,
     void* data) {
-  // TODO: Delete when the class is destroyed
   StaticVoidMethodCallbackData* callbackData = new StaticVoidMethodCallbackData({ method, data });
 
   napi_property_descriptor desc = napi_property_descriptor();
@@ -2728,11 +2973,42 @@ inline ClassPropertyDescriptor<T> ObjectWrap<T>::StaticMethod(
     StaticMethodCallback method,
     napi_property_attributes attributes,
     void* data) {
-  // TODO: Delete when the class is destroyed
   StaticMethodCallbackData* callbackData = new StaticMethodCallbackData({ method, data });
 
   napi_property_descriptor desc = napi_property_descriptor();
   desc.utf8name = utf8name;
+  desc.method = T::StaticMethodCallbackWrapper;
+  desc.data = callbackData;
+  desc.attributes = static_cast<napi_property_attributes>(attributes | napi_static);
+  return desc;
+}
+
+template <typename T>
+inline ClassPropertyDescriptor<T> ObjectWrap<T>::StaticMethod(
+    Symbol name,
+    StaticVoidMethodCallback method,
+    napi_property_attributes attributes,
+    void* data) {
+  StaticVoidMethodCallbackData* callbackData = new StaticVoidMethodCallbackData({ method, data });
+
+  napi_property_descriptor desc = napi_property_descriptor();
+  desc.name = name;
+  desc.method = T::StaticVoidMethodCallbackWrapper;
+  desc.data = callbackData;
+  desc.attributes = static_cast<napi_property_attributes>(attributes | napi_static);
+  return desc;
+}
+
+template <typename T>
+inline ClassPropertyDescriptor<T> ObjectWrap<T>::StaticMethod(
+    Symbol name,
+    StaticMethodCallback method,
+    napi_property_attributes attributes,
+    void* data) {
+  StaticMethodCallbackData* callbackData = new StaticMethodCallbackData({ method, data });
+
+  napi_property_descriptor desc = napi_property_descriptor();
+  desc.name = name;
   desc.method = T::StaticMethodCallbackWrapper;
   desc.data = callbackData;
   desc.attributes = static_cast<napi_property_attributes>(attributes | napi_static);
@@ -2746,7 +3022,6 @@ inline ClassPropertyDescriptor<T> ObjectWrap<T>::StaticAccessor(
     StaticSetterCallback setter,
     napi_property_attributes attributes,
     void* data) {
-  // TODO: Delete when the class is destroyed
   StaticAccessorCallbackData* callbackData =
     new StaticAccessorCallbackData({ getter, setter, data });
 
@@ -2760,12 +3035,30 @@ inline ClassPropertyDescriptor<T> ObjectWrap<T>::StaticAccessor(
 }
 
 template <typename T>
+inline ClassPropertyDescriptor<T> ObjectWrap<T>::StaticAccessor(
+    Symbol name,
+    StaticGetterCallback getter,
+    StaticSetterCallback setter,
+    napi_property_attributes attributes,
+    void* data) {
+  StaticAccessorCallbackData* callbackData =
+    new StaticAccessorCallbackData({ getter, setter, data });
+
+  napi_property_descriptor desc = napi_property_descriptor();
+  desc.name = name;
+  desc.getter = getter != nullptr ? T::StaticGetterCallbackWrapper : nullptr;
+  desc.setter = setter != nullptr ? T::StaticSetterCallbackWrapper : nullptr;
+  desc.data = callbackData;
+  desc.attributes = static_cast<napi_property_attributes>(attributes | napi_static);
+  return desc;
+}
+
+template <typename T>
 inline ClassPropertyDescriptor<T> ObjectWrap<T>::InstanceMethod(
     const char* utf8name,
     InstanceVoidMethodCallback method,
     napi_property_attributes attributes,
     void* data) {
-  // TODO: Delete when the class is destroyed
   InstanceVoidMethodCallbackData* callbackData =
     new InstanceVoidMethodCallbackData({ method, data});
 
@@ -2783,7 +3076,6 @@ inline ClassPropertyDescriptor<T> ObjectWrap<T>::InstanceMethod(
     InstanceMethodCallback method,
     napi_property_attributes attributes,
     void* data) {
-  // TODO: Delete when the class is destroyed
   InstanceMethodCallbackData* callbackData = new InstanceMethodCallbackData({ method, data });
 
   napi_property_descriptor desc = napi_property_descriptor();
@@ -2800,7 +3092,6 @@ inline ClassPropertyDescriptor<T> ObjectWrap<T>::InstanceMethod(
     InstanceVoidMethodCallback method,
     napi_property_attributes attributes,
     void* data) {
-  // TODO: Delete when the class is destroyed
   InstanceVoidMethodCallbackData* callbackData =
     new InstanceVoidMethodCallbackData({ method, data});
 
@@ -2818,7 +3109,6 @@ inline ClassPropertyDescriptor<T> ObjectWrap<T>::InstanceMethod(
     InstanceMethodCallback method,
     napi_property_attributes attributes,
     void* data) {
-  // TODO: Delete when the class is destroyed
   InstanceMethodCallbackData* callbackData = new InstanceMethodCallbackData({ method, data });
 
   napi_property_descriptor desc = napi_property_descriptor();
@@ -2836,12 +3126,30 @@ inline ClassPropertyDescriptor<T> ObjectWrap<T>::InstanceAccessor(
     InstanceSetterCallback setter,
     napi_property_attributes attributes,
     void* data) {
-  // TODO: Delete when the class is destroyed
   InstanceAccessorCallbackData* callbackData =
     new InstanceAccessorCallbackData({ getter, setter, data });
 
   napi_property_descriptor desc = napi_property_descriptor();
   desc.utf8name = utf8name;
+  desc.getter = getter != nullptr ? T::InstanceGetterCallbackWrapper : nullptr;
+  desc.setter = setter != nullptr ? T::InstanceSetterCallbackWrapper : nullptr;
+  desc.data = callbackData;
+  desc.attributes = attributes;
+  return desc;
+}
+
+template <typename T>
+inline ClassPropertyDescriptor<T> ObjectWrap<T>::InstanceAccessor(
+    Symbol name,
+    InstanceGetterCallback getter,
+    InstanceSetterCallback setter,
+    napi_property_attributes attributes,
+    void* data) {
+  InstanceAccessorCallbackData* callbackData =
+    new InstanceAccessorCallbackData({ getter, setter, data });
+
+  napi_property_descriptor desc = napi_property_descriptor();
+  desc.name = name;
   desc.getter = getter != nullptr ? T::InstanceGetterCallbackWrapper : nullptr;
   desc.setter = setter != nullptr ? T::InstanceSetterCallbackWrapper : nullptr;
   desc.data = callbackData;
@@ -2860,12 +3168,34 @@ inline ClassPropertyDescriptor<T> ObjectWrap<T>::StaticValue(const char* utf8nam
 }
 
 template <typename T>
+inline ClassPropertyDescriptor<T> ObjectWrap<T>::StaticValue(Symbol name,
+    Napi::Value value, napi_property_attributes attributes) {
+  napi_property_descriptor desc = napi_property_descriptor();
+  desc.name = name;
+  desc.value = value;
+  desc.attributes = static_cast<napi_property_attributes>(attributes | napi_static);
+  return desc;
+}
+
+template <typename T>
 inline ClassPropertyDescriptor<T> ObjectWrap<T>::InstanceValue(
     const char* utf8name,
     Napi::Value value,
     napi_property_attributes attributes) {
   napi_property_descriptor desc = napi_property_descriptor();
   desc.utf8name = utf8name;
+  desc.value = value;
+  desc.attributes = attributes;
+  return desc;
+}
+
+template <typename T>
+inline ClassPropertyDescriptor<T> ObjectWrap<T>::InstanceValue(
+    Symbol name,
+    Napi::Value value,
+    napi_property_attributes attributes) {
+  napi_property_descriptor desc = napi_property_descriptor();
+  desc.name = name;
   desc.value = value;
   desc.attributes = attributes;
   return desc;
@@ -3027,7 +3357,7 @@ inline HandleScope::HandleScope(napi_env env, napi_handle_scope scope)
 
 inline HandleScope::HandleScope(Napi::Env env) : _env(env) {
   napi_status status = napi_open_handle_scope(_env, &_scope);
-  NAPI_THROW_IF_FAILED(_env, status);
+  NAPI_THROW_IF_FAILED_VOID(_env, status);
 }
 
 inline HandleScope::~HandleScope() {
@@ -3052,7 +3382,7 @@ inline EscapableHandleScope::EscapableHandleScope(
 
 inline EscapableHandleScope::EscapableHandleScope(Napi::Env env) : _env(env) {
   napi_status status = napi_open_escapable_handle_scope(_env, &_scope);
-  NAPI_THROW_IF_FAILED(_env, status);
+  NAPI_THROW_IF_FAILED_VOID(_env, status);
 }
 
 inline EscapableHandleScope::~EscapableHandleScope() {
@@ -3072,6 +3402,54 @@ inline Value EscapableHandleScope::Escape(napi_value escapee) {
   napi_status status = napi_escape_handle(_env, _scope, escapee, &result);
   NAPI_THROW_IF_FAILED(_env, status, Value());
   return Value(_env, result);
+}
+
+////////////////////////////////////////////////////////////////////////////////
+// AsyncContext class
+////////////////////////////////////////////////////////////////////////////////
+
+inline AsyncContext::AsyncContext(napi_env env, const char* resource_name)
+  : AsyncContext(env, resource_name, Object::New(env)) {
+}
+
+inline AsyncContext::AsyncContext(napi_env env,
+		                  const char* resource_name,
+                                  const Object& resource)
+  : _env(env),
+    _context(nullptr) {
+  napi_value resource_id;
+  napi_status status = napi_create_string_utf8(
+      _env, resource_name, NAPI_AUTO_LENGTH, &resource_id);
+  NAPI_THROW_IF_FAILED_VOID(_env, status);
+
+  status = napi_async_init(_env, resource, resource_id, &_context);
+  NAPI_THROW_IF_FAILED_VOID(_env, status);
+}
+
+inline AsyncContext::~AsyncContext() {
+  if (_context != nullptr) {
+    napi_async_destroy(_env, _context);
+    _context = nullptr;
+  }
+}
+
+inline AsyncContext::AsyncContext(AsyncContext&& other) {
+  _env = other._env;
+  other._env = nullptr;
+  _context = other._context;
+  other._context = nullptr;
+}
+
+inline AsyncContext& AsyncContext::operator =(AsyncContext&& other) {
+  _env = other._env;
+  other._env = nullptr;
+  _context = other._context;
+  other._context = nullptr;
+  return *this;
+}
+
+inline AsyncContext::operator napi_async_context() const {
+  return _context;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -3120,11 +3498,11 @@ inline AsyncWorker::AsyncWorker(const Object& receiver,
   napi_value resource_id;
   napi_status status = napi_create_string_latin1(
       _env, resource_name, NAPI_AUTO_LENGTH, &resource_id);
-  NAPI_THROW_IF_FAILED(_env, status);
+  NAPI_THROW_IF_FAILED_VOID(_env, status);
 
   status = napi_create_async_work(_env, resource, resource_id, OnExecute,
                                   OnWorkComplete, this, &_work);
-  NAPI_THROW_IF_FAILED(_env, status);
+  NAPI_THROW_IF_FAILED_VOID(_env, status);
 }
 
 inline AsyncWorker::~AsyncWorker() {
@@ -3165,12 +3543,12 @@ inline Napi::Env AsyncWorker::Env() const {
 
 inline void AsyncWorker::Queue() {
   napi_status status = napi_queue_async_work(_env, _work);
-  NAPI_THROW_IF_FAILED(_env, status);
+  NAPI_THROW_IF_FAILED_VOID(_env, status);
 }
 
 inline void AsyncWorker::Cancel() {
   napi_status status = napi_cancel_async_work(_env, _work);
-  NAPI_THROW_IF_FAILED(_env, status);
+  NAPI_THROW_IF_FAILED_VOID(_env, status);
 }
 
 inline ObjectReference& AsyncWorker::Receiver() {
@@ -3193,7 +3571,7 @@ inline void AsyncWorker::SetError(const std::string& error) {
   _error = error;
 }
 
-inline void AsyncWorker::OnExecute(napi_env env, void* this_pointer) {
+inline void AsyncWorker::OnExecute(napi_env /*env*/, void* this_pointer) {
   AsyncWorker* self = static_cast<AsyncWorker*>(this_pointer);
 #ifdef NAPI_CPP_EXCEPTIONS
   try {
@@ -3207,7 +3585,7 @@ inline void AsyncWorker::OnExecute(napi_env env, void* this_pointer) {
 }
 
 inline void AsyncWorker::OnWorkComplete(
-    napi_env env, napi_status status, void* this_pointer) {
+    napi_env /*env*/, napi_status status, void* this_pointer) {
   AsyncWorker* self = static_cast<AsyncWorker*>(this_pointer);
   if (status != napi_cancelled) {
     HandleScope scope(self->_env);
@@ -3231,6 +3609,24 @@ inline void AsyncWorker::OnWorkComplete(
 inline int64_t MemoryManagement::AdjustExternalMemory(Env env, int64_t change_in_bytes) {
   int64_t result;
   napi_status status = napi_adjust_external_memory(env, change_in_bytes, &result);
+  NAPI_THROW_IF_FAILED(env, status, 0);
+  return result;
+}
+
+////////////////////////////////////////////////////////////////////////////////
+// Version Management class
+////////////////////////////////////////////////////////////////////////////////
+
+inline uint32_t VersionManagement::GetNapiVersion(Env env) {
+  uint32_t result;
+  napi_status status = napi_get_version(env, &result);
+  NAPI_THROW_IF_FAILED(env, status, 0);
+  return result;
+}
+
+inline const napi_node_version* VersionManagement::GetNodeVersion(Env env) {
+  const napi_node_version* result;
+  napi_status status = napi_get_node_version(env, &result);
   NAPI_THROW_IF_FAILED(env, status, 0);
   return result;
 }

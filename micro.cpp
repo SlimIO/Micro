@@ -9,10 +9,19 @@
 
 #if defined(_MSC_VER)
 #include <windows.h>
+#define BILLION (1E9)
+#define CLOCK_MONOTONIC 0
+
+// Timespec struct implementation for Windows
+struct timespec {
+    double tv_sec;
+    LONGLONG tv_nsec;
+};
 
 /**
  * gettimeofday implementation for WINDOWS !
  * 
+ * @header: windows.h
  * @doc: https://docs.microsoft.com/en-us/windows/desktop/SysInfo/converting-a-time-t-value-to-a-file-time
  * @doc: http://mathieuturcotte.ca/textes/windows-gettimeofday/
  */
@@ -42,9 +51,38 @@ int gettimeofday(struct timeval* tv, void* tz) {
 
     return 0;
 }
+
+static BOOL g_first_time = 1;
+static LARGE_INTEGER g_counts_per_sec;
+
+/**
+ * clock_gettime implementation for WINDOWS!
+ * 
+ * @header: windows.h
+ */
+int clock_gettime(int dummy, struct timespec *ct) {
+    LARGE_INTEGER count;
+
+    if (g_first_time) {
+        g_first_time = 0;
+        if (QueryPerformanceFrequency(&g_counts_per_sec) == 0) {
+            g_counts_per_sec.QuadPart = 0;
+        }
+    }
+
+    if ((ct == NULL) || (g_counts_per_sec.QuadPart <= 0) || (QueryPerformanceCounter(&count) == 0)) {
+        return -1;
+    }
+
+    ct->tv_sec = count.QuadPart / g_counts_per_sec.QuadPart;
+    ct->tv_nsec = ((count.QuadPart % g_counts_per_sec.QuadPart) * BILLION) / g_counts_per_sec.QuadPart;
+
+    return 0;
+}
 #else
 #include <sys/types.h>
 #include <sys/time.h>
+#include <time.h>
 #endif
 
 using namespace Napi;
@@ -73,6 +111,26 @@ Value _gettimeofday(const CallbackInfo& info) {
 }
 
 /**
+ * gettime (High resolution timestamp with no clock drifting)
+ */
+Value gettime(const CallbackInfo& info) {
+    Env env = info.Env();
+    timespec ts;
+    
+    if (clock_gettime(CLOCK_MONOTONIC, &ts)< 0) {
+        Error::New(env, "clock_gettime returned -1").ThrowAsJavaScriptException();
+        return env.Null();
+    }
+
+    // Return gettime struct!
+    Object ret = Object::New(env);
+    ret.Set("sec", Number::New(env, ts.tv_sec));
+    ret.Set("nsec", Number::New(env, ts.tv_nsec));
+
+    return ret;
+}
+
+/**
  *  Convert gettimeofday to microsecond timestamp
  */
 Value now(const CallbackInfo& info) {
@@ -95,6 +153,10 @@ Value now(const CallbackInfo& info) {
 Object Init(Env env, Object exports) {
     exports.Set("gettimeofday", Function::New(env, _gettimeofday));
     exports.Set("now", Function::New(env, now));
+
+    Object clock = Object::New(env);
+    clock.Set("gettime", Function::New(env, gettime));
+    exports.Set("clock", clock);
 
     return exports;
 }
