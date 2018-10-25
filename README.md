@@ -1,6 +1,6 @@
 # Micro
 
-NodeJS C NAPI low level binding to get high resolution timestamp (in microseconds).
+NodeJS C++ NAPI low level binding to get high resolution timestamp.
 
 This API is synchronous.
 
@@ -17,21 +17,25 @@ $ yarn add @slimio/micro
 ## Usage example
 
 ```js
-const micro = require("@slimio/micro");
+const { now, gettimeofday, clock } = require("@slimio/micro");
 
-console.log(micro.now()); // 1538484472718548
-console.log(micro.gettimeofday()); // { sec: 1538484493, usec: 222313 }
+console.log(now()); // 1538484472718548
+console.log(gettimeofday()); // { sec: 1538484493, usec: 222313 }
+console.log(clock.now());
+console.log(clock.gettime());
 ```
 
 ## API
 
 ### now(): number
-Return the current timestamp with a microsecond precision. You can achieve the same result with gettimeofday():
+Return the current timestamp as **microsecond**. You can achieve the same result with gettimeofday():
 ```js
 const tv = micro.gettimeofday();
 const now = (tv.sec * 1000000) + tv.usec;
 console.log(now); // 1538484472718548
 ```
+
+> Warning: Micro.now() suffers the effects of drift like Date.now()
 
 ### gettimeofday(): timeval
 UNIX gettimeofday binding (polyfill has been added for Windows too). Return a **timeval** interface Object.
@@ -42,6 +46,20 @@ interface timeval {
 }
 
 export function gettimeofday(): timeval;
+```
+
+### clock.gettime(): timespec;
+UNIX clock_gettime binding (polyfill has been added for Windows too). Return a **timespec** interface Object. This method work like NodeJS process.hrtime.
+
+### clock.now(): number;
+Return a millisecond no-drift timestamp. You can achieve the same with `clock.gettime()`:
+
+```js
+const { sec, usec } = micro.clock.gettime();
+console.log(sec * 1e3 + usec / 1e6);
+
+// same as:
+console.log(micro.clock.now());
 ```
 
 ## How to build the project
