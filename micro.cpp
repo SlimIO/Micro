@@ -110,9 +110,6 @@ Value _gettimeofday(const CallbackInfo& info) {
     return ret;
 }
 
-/**
- * gettime (High resolution timestamp with no clock drifting)
- */
 Value gettime(const CallbackInfo& info) {
     Env env = info.Env();
     timespec ts;
@@ -130,9 +127,18 @@ Value gettime(const CallbackInfo& info) {
     return ret;
 }
 
-/**
- *  Convert gettimeofday to microsecond timestamp
- */
+Value gettime_ms(const CallbackInfo& info) {
+    Env env = info.Env();
+    timespec ts;
+    
+    if (clock_gettime(CLOCK_MONOTONIC, &ts)< 0) {
+        Error::New(env, "clock_gettime returned -1").ThrowAsJavaScriptException();
+        return env.Null();
+    }
+
+    return Number::New(env, ts.tv_sec * 1e3 + ts.tv_nsec / 1e6);
+}
+
 Value now(const CallbackInfo& info) {
     Env env = info.Env();
     timeval tv;
@@ -156,6 +162,7 @@ Object Init(Env env, Object exports) {
 
     Object clock = Object::New(env);
     clock.Set("gettime", Function::New(env, gettime));
+    clock.Set("now", Function::New(env, gettime_ms));
     exports.Set("clock", clock);
 
     return exports;
