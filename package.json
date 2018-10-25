@@ -1,6 +1,6 @@
 {
   "name": "@slimio/micro",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "NodeJS C NAPI low level binding to get high resolution timestamp (in microseconds)",
   "main": "index.js",
   "engines": {
