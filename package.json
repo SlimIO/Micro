@@ -7,11 +7,13 @@
     "node": ">=10"
   },
   "scripts": {
+    "prepublishOnly": "pkg-ok",
+    "prebuilds": "prebuildify --napi",
+    "build": "cross-env node-gyp configure && node-gyp build",
     "test": "ava --verbose",
-    "doc": "jsdoc -c ./jsdoc.json -r",
+    "doc": "jsdoc -c ./jsdoc.json -r -R ./README.md -P ./package.json --verbose",
     "coverage": "nyc ava",
-    "report": "nyc report --reporter=html",
-    "install": "node-gyp rebuild"
+    "report": "nyc report --reporter=html"
   },
   "husky": {
     "hooks": {
@@ -43,10 +45,12 @@
     "@slimio/is": "^1.4.0",
     "@types/node": "^10.12.11",
     "ava": "^0.25.0",
+    "cross-env": "^5.2.0",
     "eslint": "^5.9.0",
     "husky": "^1.2.0",
     "jsdoc": "^3.5.5",
     "node-gyp": "^3.8.0",
-    "nyc": "^13.1.0"
+    "nyc": "^13.1.0",
+    "pkg-ok": "^2.3.1"
   }
 }
