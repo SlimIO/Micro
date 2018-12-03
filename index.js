@@ -1,2 +1,3 @@
-const micro = require("bindings")("micro");
+const micro = require("node-gyp-build")(__dirname);
+
 module.exports = micro;
