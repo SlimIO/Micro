@@ -33,7 +33,13 @@
     "type": "git",
     "url": "git+https://github.com/SlimIO/Micro.git"
   },
-  "keywords": [],
+  "keywords": [
+      "Micro",
+      "Clock",
+      "Nodrift",
+      "Timestamp",
+      "Nano"
+  ],
   "author": "SlimIO",
   "license": "MIT",
   "gypfile": true,
