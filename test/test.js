@@ -14,7 +14,9 @@ avaTest("Micro.now()", (assert) => {
 avaTest("Micro.clock.now()", (assert) => {
     const ts = Micro.clock.now();
     assert.true(is.number(ts));
-    assert.is(ts.toString().length, 16);
+
+    const len = ts.toString().length;
+    assert.true(len === 12 || len === 13);
 });
 
 avaTest("Micro.gettimeofday()", (assert) => {
@@ -33,6 +35,10 @@ avaTest("Micro.clock.gettime()", (assert) => {
     assert.is(Object.keys(timespec).length, 2);
     assert.true(is.number(timespec.sec));
     assert.true(is.number(timespec.nsec));
-    assert.is(timespec.sec.toString().length, 6);
-    assert.is(timespec.nsec.toString().length, 9);
+
+    const slen = timespec.sec.toString().length;
+    assert.true(slen === 5 || slen === 6);
+
+    const nlen = timespec.nsec.toString().length;
+    assert.true(nlen === 8 || nlen === 9);
 });
