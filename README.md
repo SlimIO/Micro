@@ -1,4 +1,7 @@
 # Micro
+[![Maintenance](https://img.shields.io/badge/Maintained%3F-yes-green.svg)](https://github.com/SlimIO/Micro/commit-activity)
+[![GitHub license](https://img.shields.io/github/license/Naereen/StrapDown.js.svg)](https://github.com/SlimIO/Micro/blob/master/LICENSE)
+![V1.0](https://img.shields.io/badge/version-0.2.0-blue.svg)
 
 NodeJS C++ NAPI low level binding to get high resolution timestamp.
 
