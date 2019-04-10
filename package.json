@@ -34,11 +34,11 @@
     "url": "git+https://github.com/SlimIO/Micro.git"
   },
   "keywords": [
-      "Micro",
-      "Clock",
-      "Nodrift",
-      "Timestamp",
-      "Nano"
+    "Micro",
+    "Clock",
+    "Nodrift",
+    "Timestamp",
+    "Nano"
   ],
   "author": "SlimIO",
   "license": "MIT",
@@ -52,7 +52,7 @@
     "node-gyp-build": "^3.6.0"
   },
   "devDependencies": {
-    "@commitlint/cli": "^7.2.1",
+    "@commitlint/cli": "^7.5.2",
     "@commitlint/config-conventional": "^7.1.2",
     "@escommunity/minami": "^1.0.0",
     "@slimio/eslint-config": "^2.0.3",
