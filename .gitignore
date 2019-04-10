@@ -65,3 +65,5 @@ prebuilds
 .exe
 .obj
 .vscode
+docs/
+jsdoc/
