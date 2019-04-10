@@ -49,7 +49,7 @@
   "homepage": "https://github.com/SlimIO/Micro#readme",
   "dependencies": {
     "node-addon-api": "^1.6.3",
-    "node-gyp-build": "^3.6.0"
+    "node-gyp-build": "^3.8.0"
   },
   "devDependencies": {
     "@commitlint/cli": "^7.5.2",
