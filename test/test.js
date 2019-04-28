@@ -16,7 +16,7 @@ avaTest("Micro.clock.now()", (assert) => {
     assert.true(is.number(ts));
 
     const len = ts.toString().length;
-    assert.true(len === 12 || len === 13);
+    assert.true(len >= 12);
 });
 
 avaTest("Micro.gettimeofday()", (assert) => {
