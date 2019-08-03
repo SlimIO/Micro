@@ -40,6 +40,14 @@
     "Timestamp",
     "Nano"
   ],
+  "files": [
+    "index.js",
+    "index.d.ts",
+    "binding.gyp",
+    "micro.cpp",
+    "include",
+    "src"
+  ],
   "author": "SlimIO",
   "license": "MIT",
   "gypfile": true,
