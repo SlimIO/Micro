@@ -8,7 +8,7 @@ NodeJS C++ NAPI low level binding to get high resolution timestamp.
 This API is synchronous.
 
 ## Requirements
-- [Node.js](https://nodejs.org/en/) v10 or higher
+- [Node.js](https://nodejs.org/en/) v12 or higher
 
 ## Getting Started
 
