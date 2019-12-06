@@ -5,7 +5,7 @@
 ![dep](https://img.shields.io/david/SlimIO/Micro)
 ![size](https://img.shields.io/github/languages/code-size/SlimIO/Micro)
 ![known vulnerabilities](https://img.shields.io/snyk/vulnerabilities/github/SlimIO/Micro)
-[![Build Status](https://travis-ci.com/SlimIO/Micro.svg?branch=master)](https://travis-ci.com/SlimIO/Micro)
+[![Build Status](https://travis-ci.com/SlimIO/Micro.svg?branch=master)](https://travis-ci.com/SlimIO/Micro) [![Greenkeeper badge](https://badges.greenkeeper.io/SlimIO/Micro.svg)](https://greenkeeper.io/)
 
 NodeJS C++ NAPI low level binding to get high resolution timestamp.
 
