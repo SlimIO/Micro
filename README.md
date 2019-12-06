@@ -1,7 +1,10 @@
 # Micro
+![version](https://img.shields.io/badge/dynamic/json.svg?url=https://raw.githubusercontent.com/SlimIO/Micro/master/package.json&query=$.version&label=Version)
 [![Maintenance](https://img.shields.io/badge/Maintained%3F-yes-green.svg)](https://github.com/SlimIO/Micro/commit-activity)
-[![GitHub license](https://img.shields.io/github/license/Naereen/StrapDown.js.svg)](https://github.com/SlimIO/Micro/blob/master/LICENSE)
-![V1.0](https://img.shields.io/badge/version-0.2.0-blue.svg)
+[![mit](https://img.shields.io/github/license/Naereen/StrapDown.js.svg)](https://github.com/SlimIO/Micro/blob/master/LICENSE)
+![dep](https://img.shields.io/david/SlimIO/Micro)
+![size](https://img.shields.io/github/languages/code-size/SlimIO/Micro)
+![known vulnerabilities](https://img.shields.io/snyk/vulnerabilities/github/SlimIO/Micro)
 
 NodeJS C++ NAPI low level binding to get high resolution timestamp.
 
