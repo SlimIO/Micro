@@ -45,8 +45,7 @@
     "index.d.ts",
     "binding.gyp",
     "micro.cpp",
-    "include",
-    "src"
+    "include"
   ],
   "author": "SlimIO",
   "license": "MIT",
